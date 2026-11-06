@@ -341,56 +341,57 @@ def annotate(doc_id,item):
     opacity = max(.08,min(.85,float(item.get('opacity',.38))))
     width = max(.35,min(14,float(item.get('width',1.8))))
     path = work_path(doc_id)
-    with LOCK, fitz.open(path) as pdf:
-        if not 1 <= page_n <= len(pdf):raise ValueError('页码不合法')
-        p=pdf[page_n-1]
-        annot=None
-        if kind in ('highlight','underline','rect'):
-            coords=item.get('rect')
-            if not isinstance(coords,list) or len(coords)!=4:raise ValueError('缺少矩形坐标')
-            r = fitz.Rect(*map(float,coords)) & p.rect
-            if r.is_empty or r.width<2 or r.height<2:raise ValueError('标注区域无效')
-            annot = p.add_highlight_annot(r) if kind=='highlight' else (p.add_underline_annot(r) if kind=='underline' else p.add_rect_annot(r))
-        elif kind in ('text-highlight','text-underline'):
-            rects=item.get('rects') or []
-            if not isinstance(rects,list) or not 1<=len(rects)<=100:raise ValueError('缺少选中文字的坐标')
-            quads=[]
-            for rect in rects:
-                if not isinstance(rect,list) or len(rect)!=4:continue
-                r=fitz.Rect(*map(float,rect)) & p.rect
-                if not r.is_empty and r.width>=1 and r.height>=2:quads.append(fitz.Quad(r.tl, r.tr, r.bl, r.br))
-            if not quads:raise ValueError('所选文字坐标无效，请尝试矩形标注或对本页OCR')
-            annot = p.add_highlight_annot(quads) if kind=='text-highlight' else p.add_underline_annot(quads)
-        elif kind=='selection':
-            quote = (item.get('quote') or '').strip()[:1000]
-            if len(quote)<2:raise ValueError('请先选取一段原文文字')
-            quads = p.search_for(quote, quads=True)
-            if not quads:
-                head=quote.replace('\n',' ').split('  ')[0][:100]
-                quads = p.search_for(head,quads=True)
-            if not quads:raise ValueError('未能精确定位文字，可先选中文字或尝试OCR')
-            annot=p.add_highlight_annot(quads[:40])
-        elif kind=='ink':
-            pts=item.get('points') or []
-            if not 2<=len(pts)<=5000:raise ValueError('轨迹点无效')
-            coords=[(float(x),float(y)) for x,y in pts]
-            annot=p.add_ink_annot([coords])
-        else:raise ValueError('不支持的批注类型')
-        if annot:
-            if kind == 'rect':
-                annot.set_colors(stroke=color,fill=color)
-                annot.set_border(width=.4)
-            else:annot.set_colors(stroke=color)
-            if kind=='ink':annot.set_border(width=width)
-            annot.set_opacity(opacity)
-            marker='paperisles-annot-'+uuid.uuid4().hex
-            annot.set_info({'title':'纸屿 · Paper Isles','subject':marker})
-            annot.update()
-            xref=annot.xref
-        with tempfile.NamedTemporaryFile(prefix='paperisles_',suffix='.pdf',dir=DATA_DIR/'papers',delete=False) as out:
-            tmp=Path(out.name)
-        try:pdf.save(tmp,garbage=3,deflate=True)
-        except Exception:tmp.unlink(missing_ok=True);raise
+    with LOCK:
+        with fitz.open(path) as pdf:
+            if not 1 <= page_n <= len(pdf):raise ValueError('页码不合法')
+            p=pdf[page_n-1]
+            annot=None
+            if kind in ('highlight','underline','rect'):
+                coords=item.get('rect')
+                if not isinstance(coords,list) or len(coords)!=4:raise ValueError('缺少矩形坐标')
+                r = fitz.Rect(*map(float,coords)) & p.rect
+                if r.is_empty or r.width<2 or r.height<2:raise ValueError('标注区域无效')
+                annot = p.add_highlight_annot(r) if kind=='highlight' else (p.add_underline_annot(r) if kind=='underline' else p.add_rect_annot(r))
+            elif kind in ('text-highlight','text-underline'):
+                rects=item.get('rects') or []
+                if not isinstance(rects,list) or not 1<=len(rects)<=100:raise ValueError('缺少选中文字的坐标')
+                quads=[]
+                for rect in rects:
+                    if not isinstance(rect,list) or len(rect)!=4:continue
+                    r=fitz.Rect(*map(float,rect)) & p.rect
+                    if not r.is_empty and r.width>=1 and r.height>=2:quads.append(fitz.Quad(r.tl, r.tr, r.bl, r.br))
+                if not quads:raise ValueError('所选文字坐标无效，请尝试矩形标注或对本页OCR')
+                annot = p.add_highlight_annot(quads) if kind=='text-highlight' else p.add_underline_annot(quads)
+            elif kind=='selection':
+                quote = (item.get('quote') or '').strip()[:1000]
+                if len(quote)<2:raise ValueError('请先选取一段原文文字')
+                quads = p.search_for(quote, quads=True)
+                if not quads:
+                    head=quote.replace('\n',' ').split('  ')[0][:100]
+                    quads = p.search_for(head,quads=True)
+                if not quads:raise ValueError('未能精确定位文字，可先选中文字或尝试OCR')
+                annot=p.add_highlight_annot(quads[:40])
+            elif kind=='ink':
+                pts=item.get('points') or []
+                if not 2<=len(pts)<=5000:raise ValueError('轨迹点无效')
+                coords=[(float(x),float(y)) for x,y in pts]
+                annot=p.add_ink_annot([coords])
+            else:raise ValueError('不支持的批注类型')
+            if annot:
+                if kind == 'rect':
+                    annot.set_colors(stroke=color,fill=color)
+                    annot.set_border(width=.4)
+                else:annot.set_colors(stroke=color)
+                if kind=='ink':annot.set_border(width=width)
+                annot.set_opacity(opacity)
+                marker='paperisles-annot-'+uuid.uuid4().hex
+                annot.set_info({'title':'纸屿 · Paper Isles','subject':marker})
+                annot.update()
+                xref=annot.xref
+            with tempfile.NamedTemporaryFile(prefix='paperisles_',suffix='.pdf',dir=DATA_DIR/'papers',delete=False) as out:
+                tmp=Path(out.name)
+            try:pdf.save(tmp,garbage=3,deflate=True)
+            except Exception:tmp.unlink(missing_ok=True);raise
         os.replace(tmp,path)  # atomic swap while holding LOCK
     # Garbage collection can renumber annotation xrefs. Resolve the saved xref for undo.
     with LOCK,fitz.open(path) as saved_pdf:
@@ -412,16 +413,17 @@ def get_annotations(doc_id,page):
 
 def delete_annotation(doc_id,page,xref,marker=None):
     path=work_path(doc_id)
-    with LOCK,fitz.open(path) as pdf:
-        p=pdf[page-1]
-        found=False
-        for a in p.annots() or []:
-            if (marker and (a.info or {}).get('subject')==marker) or (not marker and a.xref==int(xref)):
-                p.delete_annot(a);found=True;break
-        if not found:raise ValueError('该批注不存在')
-        with tempfile.NamedTemporaryFile(prefix='paperisles_',suffix='.pdf',dir=DATA_DIR/'papers',delete=False) as out:tmp=Path(out.name)
-        try:pdf.save(tmp,garbage=3,deflate=True)
-        except Exception:tmp.unlink(missing_ok=True);raise
+    with LOCK:
+        with fitz.open(path) as pdf:
+            p=pdf[page-1]
+            found=False
+            for a in p.annots() or []:
+                if (marker and (a.info or {}).get('subject')==marker) or (not marker and a.xref==int(xref)):
+                    p.delete_annot(a);found=True;break
+            if not found:raise ValueError('该批注不存在')
+            with tempfile.NamedTemporaryFile(prefix='paperisles_',suffix='.pdf',dir=DATA_DIR/'papers',delete=False) as out:tmp=Path(out.name)
+            try:pdf.save(tmp,garbage=3,deflate=True)
+            except Exception:tmp.unlink(missing_ok=True);raise
         os.replace(tmp,path)  # atomic swap while holding LOCK
     return {'ok':True}
 

@@ -165,6 +165,13 @@ class TestPdfEditing(unittest.TestCase):
             self.assertIn('updated PDF text',pdf[0].get_text())
             self.assertEqual(len(list(pdf[1].annots())),1)
 
+    def test_07_add_and_delete_annotation(self):
+        _, docid = self.register('annotation_roundtrip.pdf')
+        result = app.annotate(docid, dict(page=2, type='rect', rect=[70,80,300,140]))
+        self.assertEqual(len(app.get_annotations(docid, 2)), 1)
+        app.delete_annotation(docid, 2, result['xref'], result['marker'])
+        self.assertEqual(len(app.get_annotations(docid, 2)), 0)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -17,6 +17,17 @@ jobs:
       - name: Build and self-check
         shell: pwsh
         run: ./windows/build_windows.ps1
+      - name: Verify installation and packaged runtime
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/windows/*-Setup.exe | Select-Object -First 1
+          $target = Join-Path $env:RUNNER_TEMP 'PaperIsles-install-test'
+          $proc = Start-Process $installer.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target") -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Installer failed: $($proc.ExitCode)" }
+          $env:PAPER_ISLES_HOME = Join-Path $env:RUNNER_TEMP 'PaperIsles-library-test'
+          $app = Join-Path $target 'PaperIsles.exe'
+          $proc = Start-Process $app -ArgumentList '--self-check' -Wait -PassThru
+          if ($proc.ExitCode -ne 0 -or -not (Test-Path "$env:PAPER_ISLES_HOME/paper_isles.sqlite3")) { throw 'Installed app self-check failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: PaperIsles-Windows-x64
