@@ -1,0 +1,41 @@
+name: Verify Windows desktop launch
+on: workflow_dispatch
+permissions:
+  actions: read
+  contents: read
+jobs:
+  smoke:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PaperIsles-Windows-x64
+          path: installer
+          run-id: 42204130895
+          github-token: ${{ github.token }}
+      - name: Install and launch desktop application
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'PaperIsles-smoke'
+          $setup = Get-ChildItem installer/*-Setup.exe | Select-Object -First 1
+          $proc = Start-Process $setup.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target") -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw 'Installation failed' }
+          $env:PAPER_ISLES_HOME = Join-Path $env:RUNNER_TEMP 'PaperIsles-smoke-data'
+          $app = Start-Process (Join-Path $target 'PaperIsles.exe') -PassThru
+          try {
+            $found = $false
+            for ($i=0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 1
+              $app.Refresh()
+              if ($app.HasExited) { throw "Application exited: $($app.ExitCode)" }
+              if ($app.MainWindowHandle -ne 0) { $found = $true; break }
+            }
+            if (-not $found) {
+              if (Test-Path "$env:PAPER_ISLES_HOME/startup-error.log") { Get-Content "$env:PAPER_ISLES_HOME/startup-error.log" }
+              throw 'Desktop window was not detected'
+            }
+            $response = Invoke-WebRequest 'http://127.0.0.1:8765/' -UseBasicParsing -TimeoutSec 10
+            if ($response.StatusCode -ne 200 -or $response.Content -notmatch 'Paper Isles') { throw 'Application interface failed' }
+            Write-Host 'Installed desktop window and local interface started successfully.'
+          } finally { if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force } }
