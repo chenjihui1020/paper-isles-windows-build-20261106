@@ -1,0 +1,10 @@
+# Build-only requirements: end users never run pip.
+PyMuPDF>=1.25,<2
+pywebview>=5,<7
+pyobjc-core>=11,<13
+pyobjc-framework-Cocoa>=11,<13
+pyobjc-framework-WebKit>=11,<13
+pyobjc-framework-Quartz>=11,<13
+pyobjc-framework-Security>=11,<13
+pyobjc-framework-UniformTypeIdentifiers>=11,<13
+pyinstaller>=6.15,<7

@@ -1,0 +1,4 @@
+PyMuPDF>=1.25,<2
+pywebview>=5,<7
+pyinstaller>=6.15,<7
+Pillow>=11,<13

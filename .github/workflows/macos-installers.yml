@@ -1,0 +1,151 @@
+name: Paper Isles macOS One-Installer Desktop Edition
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  macos-installers:
+    name: Build ${{ matrix.display }} installer
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            display: Apple Silicon
+          - runner: macos-15-intel
+            architecture: x86_64
+            display: Intel
+
+    steps:
+      - name: Check out application source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13 for the build machine
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-build-macos.txt
+
+      - name: Verify the native builder architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner architecture: $(uname -m)"
+          test "$(uname -m)" = "${{ matrix.architecture }}"
+          python -c 'import sys; assert sys.version_info[:2] == (3, 13)'
+
+      - name: Import optional Apple Developer ID certificates
+        shell: bash
+        env:
+          APP_P12: ${{ secrets.MACOS_APPLICATION_CERT_P12_BASE64 }}
+          INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_CERT_P12_BASE64 }}
+          APP_P12_PASSWORD: ${{ secrets.MACOS_APPLICATION_CERT_PASSWORD }}
+          INSTALLER_P12_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERT_PASSWORD }}
+          APPLICATION_ID: ${{ secrets.MACOS_APP_SIGN_ID }}
+          INSTALLER_ID: ${{ secrets.MACOS_INSTALLER_SIGN_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APP_P12" && -z "$INSTALLER_P12" && -z "$APPLICATION_ID" && -z "$INSTALLER_ID" ]]; then
+            echo 'No Developer ID secrets configured: generating internal-only development installers.'
+            exit 0
+          fi
+          if [[ -z "$APP_P12" || -z "$INSTALLER_P12" || -z "$APP_P12_PASSWORD" || \
+                -z "$INSTALLER_P12_PASSWORD" || -z "$APPLICATION_ID" || -z "$INSTALLER_ID" ]]; then
+            echo 'ERROR: Both Developer ID certificates, their passwords and identities are required.' >&2
+            exit 2
+          fi
+          KEYCHAIN="$RUNNER_TEMP/paper-isles-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          printf '%s' "$APP_P12" | base64 -D > "$RUNNER_TEMP/application.p12"
+          printf '%s' "$INSTALLER_P12" | base64 -D > "$RUNNER_TEMP/installer.p12"
+          security import "$RUNNER_TEMP/application.p12" -k "$KEYCHAIN" -P "$APP_P12_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$INSTALLER_P12_PASSWORD" -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          rm -f "$RUNNER_TEMP/application.p12" "$RUNNER_TEMP/installer.p12"
+          security find-identity -v "$KEYCHAIN"
+
+      - name: Build and verify .app, .pkg, and .dmg
+        shell: bash
+        env:
+          PAPER_ISLES_INSTALL_VERIFY: "1"
+          PAPER_ISLES_PYTHON: python
+          PAPER_ISLES_APP_SIGN_ID: ${{ secrets.MACOS_APP_SIGN_ID }}
+          PAPER_ISLES_INSTALLER_SIGN_ID: ${{ secrets.MACOS_INSTALLER_SIGN_ID }}
+          PAPER_ISLES_NOTARY: ${{ vars.MACOS_NOTARIZE }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_SPECIFIC_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          bash macos/build_macos.sh
+          test -n "$(find "release/${{ matrix.architecture }}" -maxdepth 1 -name '*.pkg' -print -quit)"
+          test -n "$(find "release/${{ matrix.architecture }}" -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find "release/${{ matrix.architecture }}" -maxdepth 1 -name '*-App.zip' -print -quit)"
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperIsles-macOS-${{ matrix.architecture }}
+          path: |
+            release/${{ matrix.architecture }}/*.pkg
+            release/${{ matrix.architecture }}/*.dmg
+            release/${{ matrix.architecture }}/*-App.zip
+          compression-level: 0
+          if-no-files-found: error
+
+  publish-signed-release:
+    name: Publish notarized desktop installers
+    if: startsWith(github.ref, 'refs/tags/v') && vars.MACOS_NOTARIZE == '1'
+    needs: [macos-installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out version marker
+        uses: actions/checkout@v4
+      - name: Download notarized package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PaperIsles-macOS-*
+          merge-multiple: true
+          path: download
+      - name: Verify both public installer packages are notarized
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          shopt -s nullglob
+          assets=(download/*-RELEASE.pkg)
+          test "${#assets[@]}" -eq 2
+          test -n "$(find download -maxdepth 1 -name '*arm64-RELEASE.pkg' -print -quit)"
+          test -n "$(find download -maxdepth 1 -name '*x86_64-RELEASE.pkg' -print -quit)"
+      - name: Publish the signed and notarized downloads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(download/*-RELEASE.pkg)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "Paper Isles $GITHUB_REF_NAME · macOS" \
+              --notes 'Paper Isles macOS desktop installer. Choose arm64 for Apple Silicon or x86_64 for Intel. Double-click the PKG and approve macOS installation. The installer attempts to create a Desktop shortcut. Runtime and PDF engine are bundled; no Python or Terminal is needed.'
+          fi

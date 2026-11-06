@@ -1,0 +1,57 @@
+#!/bin/bash
+# Paper Isles - installer postflight, runs only after the user accepts Installer.
+# Best-effort: a privacy denial never prevents installing the signed .app.
+# This file is a template; build_macos.sh substitutes __APP_NAME__.
+set -u
+APP_NAME='__APP_NAME__'
+APP_PATH="/Applications/$APP_NAME.app"
+SHORTCUT_NAME="$APP_NAME.app"
+
+create_desktop_shortcut() {
+    local desktop="$1"
+    local app="${2:-$APP_PATH}"
+    local shortcut="${3:-$SHORTCUT_NAME}"
+    local destination="$desktop/$shortcut"
+    [[ -d "$desktop" && -d "$app" ]] || return 1
+    if [[ -L "$destination" ]]; then
+        [[ "$(/usr/bin/readlink "$destination")" == "$app" ]]
+        return $?
+    fi
+    [[ ! -e "$destination" ]] || return 2
+    /bin/ln -s "$app" "$destination"
+}
+
+main() {
+    local console_user user_home desktop link
+    if [[ ! -d "$APP_PATH" ]]; then
+        echo 'Paper Isles: app missing, skipping desktop shortcut.'
+        return 0
+    fi
+    console_user="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null)" || console_user=''
+    case "$console_user" in
+        ''|root|loginwindow|_mbsetupuser)
+            echo 'Paper Isles: no logged-in desktop user; shortcut skipped.'
+            return 0 ;;
+    esac
+    user_home="$(/usr/bin/dscl . -read "/Users/$console_user" NFSHomeDirectory 2>/dev/null |         /usr/bin/sed -n 's/^NFSHomeDirectory: //p' | /usr/bin/head -n 1)"
+    [[ -n "$user_home" && -d "$user_home/Desktop" ]] || {
+        echo 'Paper Isles: Desktop directory unavailable; shortcut skipped.'
+        return 0
+    }
+    desktop="$user_home/Desktop"
+    link="$desktop/$SHORTCUT_NAME"
+    if create_desktop_shortcut "$desktop" "$APP_PATH" "$SHORTCUT_NAME"; then
+        # The current user may remove their own desktop shortcut later.
+        /usr/sbin/chown -h "$console_user" "$link" 2>/dev/null || true
+        echo 'Paper Isles: desktop shortcut created or already present.'
+    else
+        # TCC privacy controls may deny Installer access to Desktop. Do not
+        # bypass privacy protections, overwrite existing icons or fail install.
+        echo 'Paper Isles: desktop shortcut not created (privacy or name conflict).'
+    fi
+    return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
