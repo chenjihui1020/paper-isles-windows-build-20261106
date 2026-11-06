@@ -10,10 +10,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 & $Python -c "from PIL import Image; Image.open('assets/PaperIsles-icon-source.png').save('windows/PaperIsles.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 if ($LASTEXITCODE -ne 0) { throw 'Icon creation failed' }
-& $Python -m PyInstaller --noconfirm --clean --onedir --windowed --name PaperIsles --icon (Join-Path $Root 'windows/PaperIsles.ico') --add-data "$(Join-Path $Root 'app/static');static" --collect-data webview --hidden-import webview.platforms.edgechromium --distpath .build/windows/dist --workpath .build/windows/work --specpath .build/windows/spec app/app.py
+& $Python -m PyInstaller --noconfirm --clean --onedir --windowed --disable-windowed-traceback --name PaperIsles --icon (Join-Path $Root 'windows/PaperIsles.ico') --add-data "$(Join-Path $Root 'app/static');static" --collect-data webview --hidden-import webview.platforms.edgechromium --distpath .build/windows/dist --workpath .build/windows/work --specpath .build/windows/spec app/app.py
 if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
 $env:PAPER_ISLES_HOME = Join-Path $env:TEMP ('paper-isles-check-' + [guid]::NewGuid())
-$process = Start-Process -FilePath '.build/windows/dist/PaperIsles/PaperIsles.exe' -ArgumentList '--self-check' -Wait -PassThru
+$process = Start-Process -FilePath '.build/windows/dist/PaperIsles/PaperIsles.exe' -ArgumentList '--self-check' -PassThru
+if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Packaged self-check timed out' }
+if (Test-Path "$env:PAPER_ISLES_HOME/startup-error.log") { Get-Content "$env:PAPER_ISLES_HOME/startup-error.log" }
 if ($process.ExitCode -ne 0 -or -not (Test-Path "$env:PAPER_ISLES_HOME/paper_isles.sqlite3")) { throw 'Packaged self-check failed' }
 Remove-Item $env:PAPER_ISLES_HOME -Recurse -Force
 Remove-Item Env:PAPER_ISLES_HOME

@@ -965,6 +965,11 @@ if __name__=='__main__':
     try:
         main()
     except Exception:
+        if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+            try:
+                (DATA_DIR / 'startup-error.log').write_text(traceback.format_exc(), encoding='utf-8')
+            except OSError:
+                pass
         traceback.print_exc()
         show_startup_alert()
         raise SystemExit(1)
