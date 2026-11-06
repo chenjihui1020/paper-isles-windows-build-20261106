@@ -12,7 +12,7 @@ jobs:
         with:
           name: PaperIsles-Windows-x64
           path: installer
-          run-id: 42204130895
+          run-id: 42205490918
           github-token: ${{ github.token }}
       - name: Install and launch desktop application
         shell: pwsh
