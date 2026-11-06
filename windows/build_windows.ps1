@@ -8,7 +8,7 @@ $Python = Join-Path $Root '.build/windows/venv/Scripts/python.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 & $Python -m unittest discover -s tests -p 'test_*.py' -v
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-& $Python -c "from PIL import Image; Image.open('assets/PaperIsles-icon-source.png').save('windows/PaperIsles.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+& $Python -c "from PIL import Image; Image.open('assets/PaperIsles-transparent.png').save('windows/PaperIsles.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 if ($LASTEXITCODE -ne 0) { throw 'Icon creation failed' }
 & $Python -m PyInstaller --noconfirm --clean --onedir --windowed --disable-windowed-traceback --name PaperIsles --icon (Join-Path $Root 'windows/PaperIsles.ico') --add-data "$(Join-Path $Root 'app/static');static" --collect-data webview --hidden-import webview.platforms.edgechromium --distpath .build/windows/dist --workpath .build/windows/work --specpath .build/windows/spec app/app.py
 if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
